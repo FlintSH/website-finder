@@ -15,6 +15,8 @@ export default function SearchForm() {
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
     }
+    setIsSearching(false);
+    setKeyword('');
   };
 
   const getRandomWord = useCallback(async () => {
