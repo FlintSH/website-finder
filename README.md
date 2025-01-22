@@ -1,63 +1,12 @@
-# Domain Search
+# website finder 🔍
 
-A Next.js application that searches for domains across multiple TLDs and provides information about their availability and content.
+A tool that helps you discover websites based on keywords. I made this because when I'm bored I like to find niche sites, and google really sucks at that.
 
-## Features
+## What it does
 
-- Search domains across multiple TLDs simultaneously
-- Real-time streaming of search results
-- Capture screenshots of live domains
-- Extract page titles
-- Modern UI with dark mode support
-- Responsive design
+- Searches every single TLD for your keyword
+- Returns back all live websites with a screenshot preview of each
+- Returns back any domains that might be available if you want to buy them
+- Can help you discover available domains
 
-## Prerequisites
-
-- Node.js 18+ and npm
-- Chrome/Chromium (for Puppeteer)
-
-## Installation
-
-1. Clone the repository:
-```bash
-git clone <repository-url>
-cd domain-search
-```
-
-2. Install dependencies:
-```bash
-npm install
-```
-
-## Development
-
-Run the development server:
-
-```bash
-npm run dev
-```
-
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
-
-## Usage
-
-1. Enter a keyword in the search box
-2. Click "Search Domains" to start the search
-3. Results will appear in real-time as domains are checked
-4. Each result shows:
-   - Domain name
-   - Page title (if available)
-   - Screenshot (if the domain is live)
-   - Status (loading/success/error)
-
-## Technical Details
-
-- Built with Next.js 14
-- Uses Tailwind CSS for styling
-- Implements server-sent events for real-time updates
-- Uses Puppeteer for web scraping and screenshots
-- Concurrent domain checking with rate limiting
-
-## License
-
-MIT
+That's it. Can't be asked to add a license, do whatever you want.
