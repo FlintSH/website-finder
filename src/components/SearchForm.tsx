@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { useSearch } from '@/context/SearchContext';
 
 export default function SearchForm() {
@@ -8,16 +8,31 @@ export default function SearchForm() {
   const [isSearching, setIsSearching] = useState(false);
   const [isLoadingWord, setIsLoadingWord] = useState(false);
   const { addResult, clearResults } = useSearch();
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  const cancelCurrentSearch = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+  };
 
   const getRandomWord = useCallback(async () => {
     setIsLoadingWord(true);
     try {
-      const response = await fetch('/api/random-word');
+      const controller = new AbortController();
+      const response = await fetch('/api/random-word', {
+        signal: controller.signal
+      });
       const { word } = await response.json();
       setKeyword(word);
       handleSubmit(null, word);
     } catch (error) {
-      console.error('Failed to get random word:', error);
+      if (error instanceof Error && error.name === 'AbortError') {
+        console.log('Random word fetch aborted');
+      } else {
+        console.error('Failed to get random word:', error);
+      }
     } finally {
       setIsLoadingWord(false);
     }
@@ -27,6 +42,11 @@ export default function SearchForm() {
     if (e) e.preventDefault();
     const searchTerm = forcedKeyword || keyword;
     if (!searchTerm.trim()) return;
+
+    cancelCurrentSearch();
+
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
 
     setIsSearching(true);
     clearResults();
@@ -38,6 +58,7 @@ export default function SearchForm() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ keyword: searchTerm.trim() }),
+        signal: controller.signal
       });
 
       if (!response.ok) {
@@ -51,11 +72,18 @@ export default function SearchForm() {
         const { done, value } = await reader.read();
         if (done) break;
 
+        if (controller.signal.aborted) {
+          reader.cancel();
+          break;
+        }
+
         const text = new TextDecoder().decode(value);
         const lines = text.split('\n').filter(Boolean);
         
         for (const line of lines) {
           try {
+            if (controller.signal.aborted) break;
+            
             const result = JSON.parse(line);
             addResult(result);
           } catch (parseError) {
@@ -65,11 +93,24 @@ export default function SearchForm() {
         }
       }
     } catch (error) {
-      console.error('Search error:', error);
+      if (error instanceof Error && error.name === 'AbortError') {
+        console.log('Search aborted');
+      } else {
+        console.error('Search error:', error);
+      }
     } finally {
-      setIsSearching(false);
+      if (abortControllerRef.current === controller) {
+        setIsSearching(false);
+        abortControllerRef.current = null;
+      }
     }
   };
+
+  useEffect(() => {
+    return () => {
+      cancelCurrentSearch();
+    };
+  }, []);
 
   return (
     <div className="space-y-4">

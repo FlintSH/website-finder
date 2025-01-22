@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import puppeteer from 'puppeteer';
+import puppeteer, { Browser } from 'puppeteer';
 import { TLDS, isHighPriorityTld } from '@/data/tlds';
 
 interface StatusLog {
@@ -30,7 +30,7 @@ interface DomainUpdate {
   isHighPriority?: boolean;
 }
 
-const TIMEOUT = 35000; // 35 seconds timeout
+const TIMEOUT = 35000;
 
 function getErrorDetails(error: Error): { status: DomainStatus; message: string; code: string } {
   const errorMessage = error.message.toLowerCase();
@@ -82,30 +82,62 @@ function getErrorDetails(error: Error): { status: DomainStatus; message: string;
   };
 }
 
+const browserPool: Browser[] = [];
+const MAX_POOL_SIZE = 3;
+const MAX_CONCURRENT_PAGES = 20;
+
+async function getBrowser() {
+  let browser = browserPool.pop();
+  
+  if (!browser) {
+    if (browserPool.length < MAX_POOL_SIZE) {
+      browser = await puppeteer.launch({
+        headless: true,
+        args: ['--no-sandbox', '--disable-setuid-sandbox'],
+      });
+    } else {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      return getBrowser();
+    }
+  }
+  
+  return browser;
+}
+
+async function releaseBrowser(browser: Browser) {
+  if (browserPool.length < MAX_POOL_SIZE) {
+    browserPool.push(browser);
+  } else {
+    await browser.close();
+  }
+}
+
 export async function POST(request: NextRequest) {
   const { keyword, singleDomain } = await request.json();
   
-  // Create a stream to send results back to the client
   const stream = new TransformStream();
   const writer = stream.writable.getWriter();
   
-  // Start the browser
-  const browser = await puppeteer.launch({
-    headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox'],
+  const browser = await getBrowser();
+
+  request.signal.addEventListener('abort', async () => {
+    console.log('Client disconnected, cleaning up...');
+    await releaseBrowser(browser);
   });
 
-  // Process domains in parallel with a concurrency limit
-  const concurrencyLimit = 5;
   let activeTasks = 0;
   let currentTldIndex = 0;
 
   const sendUpdate = async (update: DomainUpdate) => {
-    await writer.write(
-      new TextEncoder().encode(
-        JSON.stringify(update) + '\n'
-      )
-    );
+    try {
+      await writer.write(
+        new TextEncoder().encode(
+          JSON.stringify(update) + '\n'
+        )
+      );
+    } catch (error) {
+      console.error('Error sending update:', error);
+    }
   };
 
   const processNextDomain = async () => {
@@ -121,7 +153,6 @@ export async function POST(request: NextRequest) {
       const page = await browser.newPage();
       await page.setViewport({ width: 1280, height: 720 });
       
-      // Send initial status
       await sendUpdate({
         domain,
         status: 'loading',
@@ -136,7 +167,6 @@ export async function POST(request: NextRequest) {
       });
 
       try {
-        // Create a promise that rejects after timeout
         const timeoutPromise = new Promise((_, reject) => {
           setTimeout(() => reject(new Error('Timeout')), TIMEOUT);
         });
@@ -150,7 +180,6 @@ export async function POST(request: NextRequest) {
           }]
         });
 
-        // Race between the page load and timeout
         await Promise.race([
           page.goto(`https://${domain}`, {
             waitUntil: 'networkidle0',
@@ -167,7 +196,6 @@ export async function POST(request: NextRequest) {
           }]
         });
 
-        // Get the page title
         const title = await page.title();
         await sendUpdate({
           domain,
@@ -178,7 +206,6 @@ export async function POST(request: NextRequest) {
           }]
         });
 
-        // Take a screenshot
         await sendUpdate({
           domain,
           logs: [{
@@ -202,7 +229,7 @@ export async function POST(request: NextRequest) {
             }
           });
 
-          const maxSize = 500000; // ~500KB
+          const maxSize = 500000;
           if (screenshot.length > maxSize) {
             throw new Error('Screenshot too large');
           }
@@ -225,7 +252,6 @@ export async function POST(request: NextRequest) {
           return;
         }
 
-        // Only mark as success if we got both connection and screenshot
         await sendUpdate({
           domain,
           status: 'success',
@@ -240,7 +266,6 @@ export async function POST(request: NextRequest) {
           }]
         });
       } catch (error) {
-        // Get detailed error information
         const errorDetails = getErrorDetails(error instanceof Error ? error : new Error('Unknown error'));
 
         await sendUpdate({
@@ -286,25 +311,23 @@ export async function POST(request: NextRequest) {
     }
 
     activeTasks--;
-    if (activeTasks < concurrencyLimit && !singleDomain) {
+    if (activeTasks < MAX_CONCURRENT_PAGES && !singleDomain) {
       processNextDomain();
     }
   };
 
-  // Start initial batch of tasks
   if (singleDomain) {
     await processNextDomain();
   } else {
-    for (let i = 0; i < concurrencyLimit; i++) {
+    for (let i = 0; i < MAX_CONCURRENT_PAGES; i++) {
       processNextDomain();
     }
   }
 
-  // Wait for all tasks to complete
   const checkCompletion = () => {
     if (activeTasks === 0 && (currentTldIndex >= TLDS.length || singleDomain)) {
       writer.close();
-      browser.close();
+      releaseBrowser(browser);
     } else {
       setTimeout(checkCompletion, 1000);
     }

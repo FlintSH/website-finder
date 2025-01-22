@@ -3,7 +3,11 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import { SearchProvider } from "@/context/SearchContext";
 
-const inter = Inter({ subsets: ["latin"] });
+const inter = Inter({
+  subsets: ["latin"],
+  display: "swap",
+  variable: "--font-inter",
+});
 
 export const metadata: Metadata = {
   title: "website finder",
@@ -19,8 +23,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className="dark">
-      <body className={`${inter.className} bg-gray-900 text-gray-100`}>
+    <html lang="en" className={`dark ${inter.variable}`}>
+      <body className="bg-gray-900 text-gray-100 font-sans">
         <SearchProvider>
           {children}
         </SearchProvider>
