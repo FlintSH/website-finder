@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useRef, useEffect, KeyboardEvent } from 'react';
+import { useState, useCallback, useRef, useEffect, FormEvent } from 'react';
 import { useSearch } from '@/context/SearchContext';
 
 export default function SearchForm() {
@@ -10,37 +10,16 @@ export default function SearchForm() {
   const { addResult, clearResults } = useSearch();
   const abortControllerRef = useRef<AbortController | null>(null);
 
-  const cancelCurrentSearch = () => {
+  const cancelCurrentSearch = useCallback(() => {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
     }
     setIsSearching(false);
     setKeyword('');
-  };
-
-  const getRandomWord = useCallback(async () => {
-    setIsLoadingWord(true);
-    try {
-      const controller = new AbortController();
-      const response = await fetch('/api/random-word', {
-        signal: controller.signal
-      });
-      const { word } = await response.json();
-      setKeyword(word);
-      handleSubmit(null, word);
-    } catch (error) {
-      if (error instanceof Error && error.name === 'AbortError') {
-        console.log('Random word fetch aborted');
-      } else {
-        console.error('Failed to get random word:', error);
-      }
-    } finally {
-      setIsLoadingWord(false);
-    }
   }, []);
 
-  const handleSubmit = async (e: React.FormEvent | null, forcedKeyword?: string) => {
+  const handleSubmit = useCallback(async (e?: FormEvent | null, forcedKeyword?: string) => {
     if (e) e.preventDefault();
     const searchTerm = forcedKeyword || keyword;
     if (!searchTerm.trim()) return;
@@ -106,9 +85,34 @@ export default function SearchForm() {
         abortControllerRef.current = null;
       }
     }
-  };
+  }, [keyword, cancelCurrentSearch, clearResults, addResult]);
 
-  const handleKeyDown = useCallback((e: KeyboardEvent<HTMLInputElement>) => {
+  const getRandomWord = useCallback(async () => {
+    setIsLoadingWord(true);
+    try {
+      // Cancel any existing search
+      cancelCurrentSearch();
+      clearResults();
+
+      const controller = new AbortController();
+      const response = await fetch('/api/random-word', {
+        signal: controller.signal
+      });
+      const { word } = await response.json();
+      setKeyword(word);
+      handleSubmit(null, word);
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        console.log('Random word fetch aborted');
+      } else {
+        console.error('Failed to get random word:', error);
+      }
+    } finally {
+      setIsLoadingWord(false);
+    }
+  }, [cancelCurrentSearch, clearResults, handleSubmit, setKeyword]);
+
+  const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
       e.preventDefault();
       handleSubmit(e);
@@ -119,7 +123,7 @@ export default function SearchForm() {
     return () => {
       cancelCurrentSearch();
     };
-  }, []);
+  }, [cancelCurrentSearch]);
 
   return (
     <div className="space-y-4">
