@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect, KeyboardEvent } from 'react';
 import { useSearch } from '@/context/SearchContext';
 
 export default function SearchForm() {
@@ -106,6 +106,13 @@ export default function SearchForm() {
     }
   };
 
+  const handleKeyDown = useCallback((e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleSubmit(e);
+    }
+  }, [handleSubmit]);
+
   useEffect(() => {
     return () => {
       cancelCurrentSearch();
@@ -124,6 +131,7 @@ export default function SearchForm() {
             className="w-full px-4 py-3 pr-24 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
             placeholder="Enter a keyword..."
             disabled={isSearching}
+            onKeyDown={handleKeyDown}
           />
           <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-2">
             {isSearching && (

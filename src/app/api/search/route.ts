@@ -137,6 +137,17 @@ export async function POST(request: NextRequest) {
     }
 
     try {
+      if (update.screenshot) {
+        try {
+          JSON.stringify({ test: update.screenshot });
+        } catch (error) {
+          console.error('Screenshot data caused JSON serialization error:', error);
+          update.screenshot = '';
+          update.error = 'Screenshot data was invalid';
+          update.status = 'invalid_response';
+        }
+      }
+
       await writer.write(
         new TextEncoder().encode(
           JSON.stringify(update) + '\n'

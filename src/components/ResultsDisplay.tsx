@@ -4,33 +4,52 @@ import { useState, useEffect, useCallback } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useSearch } from '@/context/SearchContext';
 import DomainDetails from './DomainDetails';
+import Image from 'next/image';
+
+interface DomainResult {
+  domain: string;
+  status: string;
+  screenshot?: string;
+  title?: string;
+  responseTime?: number;
+  error?: string;
+  errorCode?: string;
+  isHighPriority?: boolean;
+}
 
 export default function ResultsDisplay() {
   const { filteredResults, filters, setFilters, results, recheckDomain } = useSearch();
   const [selectedDomain, setSelectedDomain] = useState<string | null>(null);
 
-  const getColumnCount = useCallback(() => {
-    const width = window.innerWidth;
-    if (width >= 2560) return 5;
-    if (width >= 1920) return 4;
-    if (width >= 1280) return 3;
-    if (width >= 768) return 2;
-    return 1;
-  }, []);
-
-  const [columnCount, setColumnCount] = useState(getColumnCount);
+  // Calculate the number of columns based on window width
+  const [columnCount, setColumnCount] = useState(5); // Default to max columns
 
   useEffect(() => {
+    const getColumnCount = () => {
+      const width = window.innerWidth;
+      if (width >= 2560) return 5; // 2xl
+      if (width >= 1920) return 4; // xl
+      if (width >= 1280) return 3; // lg
+      if (width >= 768) return 2; // sm
+      return 1; // mobile
+    };
+
     const updateColumnCount = () => {
       setColumnCount(getColumnCount());
     };
 
+    // Initial calculation
+    updateColumnCount();
+
+    // Update on resize
     window.addEventListener('resize', updateColumnCount);
     return () => window.removeEventListener('resize', updateColumnCount);
-  }, [getColumnCount]);
+  }, []);
 
+  // Calculate rows needed based on items and columns
   const rowCount = Math.ceil(filteredResults.length / columnCount);
 
+  // Create virtualizer for rows
   const rowVirtualizer = useVirtualizer({
     count: rowCount,
     getScrollElement: useCallback(() => document.documentElement, []),
@@ -127,6 +146,34 @@ export default function ResultsDisplay() {
   const selectedResult = selectedDomain 
     ? results.find(r => r.domain === selectedDomain)
     : null;
+
+  // Update the image rendering to use next/image
+  const renderScreenshot = (result: DomainResult) => {
+    if (result.status === 'loading') {
+      return <div className="absolute inset-0 animate-pulse bg-gray-200 dark:bg-gray-600" />;
+    }
+    
+    if (result.screenshot) {
+      return (
+        <div className="relative w-full h-full">
+          <Image
+            src={result.screenshot}
+            alt={`Screenshot of ${result.domain}`}
+            fill
+            className="object-contain bg-white dark:bg-gray-900"
+            unoptimized // Since we're using data URLs
+            priority={false}
+          />
+        </div>
+      );
+    }
+    
+    return (
+      <div className="absolute inset-0 flex items-center justify-center">
+        <span className="text-gray-400 dark:text-gray-500">No screenshot available</span>
+      </div>
+    );
+  };
 
   return (
     <div className="mt-8 space-y-6 max-w-[1800px] mx-auto px-6">
@@ -250,21 +297,7 @@ export default function ResultsDisplay() {
                       className="relative aspect-video bg-gray-100 dark:bg-gray-700 cursor-pointer"
                       onClick={() => setSelectedDomain(result.domain)}
                     >
-                      {result.status === 'loading' ? (
-                        <div className="absolute inset-0 animate-pulse bg-gray-200 dark:bg-gray-600" />
-                      ) : result.screenshot ? (
-                        <img
-                          loading="lazy"
-                          decoding="async"
-                          src={result.screenshot}
-                          alt={`Screenshot of ${result.domain}`}
-                          className="absolute inset-0 w-full h-full object-contain bg-white dark:bg-gray-900"
-                        />
-                      ) : (
-                        <div className="absolute inset-0 flex items-center justify-center">
-                          <span className="text-gray-400 dark:text-gray-500">No screenshot available</span>
-                        </div>
-                      )}
+                      {renderScreenshot(result)}
                     </div>
 
                     <div className="p-4 space-y-2">

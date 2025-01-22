@@ -1,5 +1,6 @@
 import SearchForm from '@/components/SearchForm';
 import ResultsDisplay from '@/components/ResultsDisplay';
+import Image from 'next/image';
 
 export default function Home() {
   return (
@@ -27,10 +28,12 @@ export default function Home() {
             className="text-sm text-gray-500 hover:text-gray-300 transition-colors duration-200 inline-flex items-center group mb-4"
           >
             by
-            <img 
+            <Image 
               src="https://github.com/FlintSH.png" 
               alt="FlintSH" 
-              className="w-4 h-4 rounded-full mx-1.5 border border-gray-700"
+              width={16}
+              height={16}
+              className="rounded-full mx-1.5 border border-gray-700"
             />
             FlintSH
             <svg 
