@@ -119,9 +119,12 @@ export async function POST(request: NextRequest) {
   const writer = stream.writable.getWriter();
   
   const browser = await getBrowser();
+  let isAborted = false;
 
   request.signal.addEventListener('abort', async () => {
     console.log('Client disconnected, cleaning up...');
+    isAborted = true;
+    await writer.close().catch(() => {});
     await releaseBrowser(browser);
   });
 
@@ -129,6 +132,10 @@ export async function POST(request: NextRequest) {
   let currentTldIndex = 0;
 
   const sendUpdate = async (update: DomainUpdate) => {
+    if (isAborted) {
+      throw new Error('CLIENT_DISCONNECTED');
+    }
+
     try {
       await writer.write(
         new TextEncoder().encode(
@@ -136,21 +143,29 @@ export async function POST(request: NextRequest) {
         )
       );
     } catch (error) {
+      if (error instanceof Error && error.message.includes('ResponseAborted')) {
+        console.log('Client disconnected, stopping search');
+        isAborted = true;
+        await writer.close().catch(() => {});
+        await releaseBrowser(browser);
+        throw new Error('CLIENT_DISCONNECTED');
+      }
       console.error('Error sending update:', error);
     }
   };
 
   const processNextDomain = async () => {
-    if (currentTldIndex >= TLDS.length && !singleDomain) return;
+    if (isAborted || (currentTldIndex >= TLDS.length && !singleDomain)) return;
 
     const domain = singleDomain || `${keyword}.${TLDS[currentTldIndex++]}`;
     const startTime = Date.now();
     activeTasks++;
 
-    const isHighPriority = isHighPriorityTld(domain.split('.').pop() || '');
-
+    let page;
     try {
-      const page = await browser.newPage();
+      if (isAborted) return;
+      
+      page = await browser.newPage();
       await page.setViewport({ width: 1280, height: 720 });
       
       await sendUpdate({
@@ -158,13 +173,18 @@ export async function POST(request: NextRequest) {
         status: 'loading',
         title: '',
         screenshot: '',
-        isHighPriority,
+        isHighPriority: isHighPriorityTld(domain.split('.').pop() || ''),
         logs: [{
           timestamp: Date.now(),
           message: 'Starting domain check...',
           type: 'info'
         }]
       });
+
+      if (isAborted) {
+        await page.close();
+        return;
+      }
 
       try {
         const timeoutPromise = new Promise((_, reject) => {
@@ -179,6 +199,11 @@ export async function POST(request: NextRequest) {
             type: 'info'
           }]
         });
+
+        if (isAborted) {
+          await page.close();
+          return;
+        }
 
         await Promise.race([
           page.goto(`https://${domain}`, {
@@ -242,7 +267,7 @@ export async function POST(request: NextRequest) {
             responseTime: Date.now() - startTime,
             error: 'Site is live but screenshot failed',
             errorCode: 'SCREENSHOT_FAILED',
-            isHighPriority,
+            isHighPriority: isHighPriorityTld(domain.split('.').pop() || ''),
             logs: [{
               timestamp: Date.now(),
               message: 'Failed to capture screenshot (size limit exceeded)',
@@ -258,7 +283,7 @@ export async function POST(request: NextRequest) {
           title,
           screenshot: `data:image/jpeg;base64,${screenshot}`,
           responseTime: Date.now() - startTime,
-          isHighPriority,
+          isHighPriority: isHighPriorityTld(domain.split('.').pop() || ''),
           logs: [{
             timestamp: Date.now(),
             message: 'Domain check completed successfully',
@@ -266,8 +291,12 @@ export async function POST(request: NextRequest) {
           }]
         });
       } catch (error) {
-        const errorDetails = getErrorDetails(error instanceof Error ? error : new Error('Unknown error'));
+        if (isAborted) {
+          await page?.close();
+          return;
+        }
 
+        const errorDetails = getErrorDetails(error instanceof Error ? error : new Error('Unknown error'));
         await sendUpdate({
           domain,
           status: errorDetails.status,
@@ -276,57 +305,66 @@ export async function POST(request: NextRequest) {
           responseTime: Date.now() - startTime,
           error: errorDetails.message,
           errorCode: errorDetails.code,
-          isHighPriority,
+          isHighPriority: isHighPriorityTld(domain.split('.').pop() || ''),
           logs: [{
             timestamp: Date.now(),
             message: errorDetails.message,
             type: 'error'
           }]
-        });
+        }).catch(() => {});
       }
 
-      await page.close();
-      await sendUpdate({
-        domain,
-        logs: [{
-          timestamp: Date.now(),
-          message: 'Closed browser page',
-          type: 'info'
-        }]
-      });
-    } catch (error) {
-      console.error(`Error processing ${domain}:`, error);
-      await sendUpdate({
-        domain,
-        status: 'internal_error',
-        error: 'Internal processing error',
-        errorCode: 'INTERNAL_ERROR',
-        isHighPriority,
-        logs: [{
-          timestamp: Date.now(),
-          message: 'Internal processing error occurred',
-          type: 'error'
-        }]
-      });
+      if (!isAborted) {
+        await page?.close();
+        await sendUpdate({
+          domain,
+          logs: [{
+            timestamp: Date.now(),
+            message: 'Closed browser page',
+            type: 'info'
+          }]
+        }).catch(() => {});
+      }
+    } catch (error: unknown) {
+      await page?.close();
+      if (error instanceof Error && error.message === 'CLIENT_DISCONNECTED') {
+        console.log(`Stopping search for ${domain} due to client disconnect`);
+        return;
+      }
+      if (!isAborted) {
+        console.error(`Error processing ${domain}:`, error);
+        await sendUpdate({
+          domain,
+          status: 'internal_error',
+          error: 'Internal processing error',
+          errorCode: 'INTERNAL_ERROR',
+          isHighPriority: isHighPriorityTld(domain.split('.').pop() || ''),
+          logs: [{
+            timestamp: Date.now(),
+            message: 'Internal processing error occurred',
+            type: 'error'
+          }]
+        }).catch(() => {});
+      }
     }
 
     activeTasks--;
-    if (activeTasks < MAX_CONCURRENT_PAGES && !singleDomain) {
-      processNextDomain();
+    if (!isAborted && activeTasks < MAX_CONCURRENT_PAGES && !singleDomain) {
+      processNextDomain().catch(console.error);
     }
   };
 
   if (singleDomain) {
     await processNextDomain();
   } else {
-    for (let i = 0; i < MAX_CONCURRENT_PAGES; i++) {
-      processNextDomain();
+    for (let i = 0; i < MAX_CONCURRENT_PAGES && !isAborted; i++) {
+      processNextDomain().catch(console.error);
     }
   }
 
   const checkCompletion = () => {
-    if (activeTasks === 0 && (currentTldIndex >= TLDS.length || singleDomain)) {
-      writer.close();
+    if (isAborted || (activeTasks === 0 && (currentTldIndex >= TLDS.length || singleDomain))) {
+      writer.close().catch(() => {});
       releaseBrowser(browser);
     } else {
       setTimeout(checkCompletion, 1000);

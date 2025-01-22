@@ -1,12 +1,42 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { useSearch } from '@/context/SearchContext';
 import DomainDetails from './DomainDetails';
 
 export default function ResultsDisplay() {
   const { filteredResults, filters, setFilters, results, recheckDomain } = useSearch();
   const [selectedDomain, setSelectedDomain] = useState<string | null>(null);
+
+  const getColumnCount = useCallback(() => {
+    const width = window.innerWidth;
+    if (width >= 2560) return 5;
+    if (width >= 1920) return 4;
+    if (width >= 1280) return 3;
+    if (width >= 768) return 2;
+    return 1;
+  }, []);
+
+  const [columnCount, setColumnCount] = useState(getColumnCount);
+
+  useEffect(() => {
+    const updateColumnCount = () => {
+      setColumnCount(getColumnCount());
+    };
+
+    window.addEventListener('resize', updateColumnCount);
+    return () => window.removeEventListener('resize', updateColumnCount);
+  }, [getColumnCount]);
+
+  const rowCount = Math.ceil(filteredResults.length / columnCount);
+
+  const rowVirtualizer = useVirtualizer({
+    count: rowCount,
+    getScrollElement: useCallback(() => document.documentElement, []),
+    estimateSize: () => 400,
+    overscan: 5,
+  });
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -167,134 +197,160 @@ export default function ResultsDisplay() {
           {results.length === 0 ? 'No results yet. Start a search to see domains.' : 'No domains match the selected filters.'}
         </p>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4">
-          {filteredResults.map((result, index) => (
-            <div
-              key={result.domain + index}
-              className="bg-white dark:bg-gray-800 rounded-lg overflow-hidden shadow-sm hover:shadow-md transition-shadow"
-            >
-              <div className={`px-4 py-2 ${getStatusBgColor(result.status)} flex items-center justify-between`}>
-                <div className="flex items-center space-x-2">
-                  <span className={getStatusColor(result.status)}>
-                    {getStatusIcon(result.status)}
-                  </span>
-                  <span className={`text-sm font-medium ${getStatusColor(result.status)}`}>
-                    {getStatusText(result.status)}
-                  </span>
-                </div>
-                {result.status !== 'success' && result.status !== 'loading' && (
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      recheckDomain(result.domain);
-                    }}
-                    className="text-sm text-blue-600 hover:text-blue-500 dark:text-blue-400 dark:hover:text-blue-300"
-                  >
-                    Recheck
-                  </button>
-                )}
-              </div>
+        <div
+          style={{
+            height: `${rowVirtualizer.getTotalSize()}px`,
+            position: 'relative',
+          }}
+        >
+          {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+            const rowStartIndex = virtualRow.index * columnCount;
+            const rowItems = filteredResults.slice(rowStartIndex, rowStartIndex + columnCount);
 
+            return (
               <div
-                className="relative aspect-video bg-gray-100 dark:bg-gray-700 cursor-pointer"
-                onClick={() => setSelectedDomain(result.domain)}
+                key={virtualRow.index}
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  width: '100%',
+                  transform: `translateY(${virtualRow.start}px)`,
+                }}
+                className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4"
               >
-                {result.status === 'loading' ? (
-                  <div className="absolute inset-0 animate-pulse bg-gray-200 dark:bg-gray-600" />
-                ) : result.screenshot ? (
-                  <img
-                    src={result.screenshot}
-                    alt={`Screenshot of ${result.domain}`}
-                    className="absolute inset-0 w-full h-full object-contain bg-white dark:bg-gray-900"
-                  />
-                ) : (
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <span className="text-gray-400 dark:text-gray-500">No screenshot available</span>
-                  </div>
-                )}
-              </div>
+                {rowItems.map((result, index) => (
+                  <div
+                    key={result.domain + index}
+                    className="bg-white dark:bg-gray-800 rounded-lg overflow-hidden shadow-sm hover:shadow-md transition-shadow"
+                  >
+                    <div className={`px-4 py-2 ${getStatusBgColor(result.status)} flex items-center justify-between`}>
+                      <div className="flex items-center space-x-2">
+                        <span className={getStatusColor(result.status)}>
+                          {getStatusIcon(result.status)}
+                        </span>
+                        <span className={`text-sm font-medium ${getStatusColor(result.status)}`}>
+                          {getStatusText(result.status)}
+                        </span>
+                      </div>
+                      {result.status !== 'success' && result.status !== 'loading' && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            recheckDomain(result.domain);
+                          }}
+                          className="text-sm text-blue-600 hover:text-blue-500 dark:text-blue-400 dark:hover:text-blue-300"
+                        >
+                          Recheck
+                        </button>
+                      )}
+                    </div>
 
-              <div className="p-4 space-y-2">
-                <div className="flex items-center justify-between">
-                  <h3 className="font-medium text-gray-900 dark:text-white truncate flex-1 flex items-center">
-                    {result.domain}
-                    {result.isHighPriority && (
-                      <span className="ml-2 px-1.5 py-0.5 text-xs font-medium bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300 rounded">
-                        Common TLD
-                      </span>
-                    )}
-                  </h3>
-                  {result.responseTime && (
-                    <span className="text-sm text-gray-500 dark:text-gray-400 ml-2">
-                      {result.responseTime}ms
-                    </span>
-                  )}
-                </div>
-
-                {result.title && (
-                  <p className="text-sm text-gray-500 dark:text-gray-400 truncate">
-                    {result.title}
-                  </p>
-                )}
-
-                {result.error && result.status !== 'success' && (
-                  <p className={`text-sm ${getStatusColor(result.status)}`}>
-                    {result.error}
-                  </p>
-                )}
-
-                <div className="pt-2 flex items-center justify-between">
-                  {result.status === 'success' ? (
-                    <>
-                      <a
-                        href={`https://${result.domain}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center text-sm text-blue-600 hover:text-blue-500 dark:text-blue-400 dark:hover:text-blue-300"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        Visit Website
-                        <svg className="w-4 h-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                        </svg>
-                      </a>
-                      <a
-                        href={`https://porkbun.com/checkout/search?q=${result.domain}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center text-sm text-purple-500 hover:text-purple-400 dark:text-purple-400 dark:hover:text-purple-300"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        Check on Porkbun
-                        <svg className="w-4 h-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 6l3 1m0 0l-3 9a5.002 5.002 0 006.001 0M6 7l3 9M6 7l6-2m6 2l3-1m-3 1l-3 9a5.002 5.002 0 006.001 0M18 7l3 9m-3-9l-6-2m0-2v2m0 16V5m0 16H9m3 0h3" />
-                        </svg>
-                      </a>
-                    </>
-                  ) : (
-                    <a
-                      href={`https://porkbun.com/checkout/search?q=${result.domain}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center text-sm text-purple-500 hover:text-purple-400 dark:text-purple-400 dark:hover:text-purple-300"
-                      onClick={(e) => e.stopPropagation()}
+                    <div
+                      className="relative aspect-video bg-gray-100 dark:bg-gray-700 cursor-pointer"
+                      onClick={() => setSelectedDomain(result.domain)}
                     >
-                      {result.status === 'dns_error' ? 'Check Availability' : 'Check on Porkbun'}
-                      <svg className="w-4 h-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 6l3 1m0 0l-3 9a5.002 5.002 0 006.001 0M6 7l3 9M6 7l6-2m6 2l3-1m-3 1l-3 9a5.002 5.002 0 006.001 0M18 7l3 9m-3-9l-6-2m0-2v2m0 16V5m0 16H9m3 0h3" />
-                      </svg>
-                    </a>
-                  )}
-                </div>
+                      {result.status === 'loading' ? (
+                        <div className="absolute inset-0 animate-pulse bg-gray-200 dark:bg-gray-600" />
+                      ) : result.screenshot ? (
+                        <img
+                          loading="lazy"
+                          decoding="async"
+                          src={result.screenshot}
+                          alt={`Screenshot of ${result.domain}`}
+                          className="absolute inset-0 w-full h-full object-contain bg-white dark:bg-gray-900"
+                        />
+                      ) : (
+                        <div className="absolute inset-0 flex items-center justify-center">
+                          <span className="text-gray-400 dark:text-gray-500">No screenshot available</span>
+                        </div>
+                      )}
+                    </div>
 
-                {result.status === 'dns_error' && (
-                  <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-                    DNS lookup failed, domain might be available for purchase
-                  </p>
-                )}
+                    <div className="p-4 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <h3 className="font-medium text-gray-900 dark:text-white truncate flex-1 flex items-center">
+                          {result.domain}
+                          {result.isHighPriority && (
+                            <span className="ml-2 px-1.5 py-0.5 text-xs font-medium bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300 rounded">
+                              Common TLD
+                            </span>
+                          )}
+                        </h3>
+                        {result.responseTime && (
+                          <span className="text-sm text-gray-500 dark:text-gray-400 ml-2">
+                            {result.responseTime}ms
+                          </span>
+                        )}
+                      </div>
+
+                      {result.title && (
+                        <p className="text-sm text-gray-500 dark:text-gray-400 truncate">
+                          {result.title}
+                        </p>
+                      )}
+
+                      {result.error && result.status !== 'success' && (
+                        <p className={`text-sm ${getStatusColor(result.status)}`}>
+                          {result.error}
+                        </p>
+                      )}
+
+                      <div className="pt-2 flex items-center justify-between">
+                        {result.status === 'success' ? (
+                          <>
+                            <a
+                              href={`https://${result.domain}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center text-sm text-blue-600 hover:text-blue-500 dark:text-blue-400 dark:hover:text-blue-300"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              Visit Website
+                              <svg className="w-4 h-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                              </svg>
+                            </a>
+                            <a
+                              href={`https://porkbun.com/checkout/search?q=${result.domain}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center text-sm text-purple-500 hover:text-purple-400 dark:text-purple-400 dark:hover:text-purple-300"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              Check on Porkbun
+                              <svg className="w-4 h-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 6l3 1m0 0l-3 9a5.002 5.002 0 006.001 0M6 7l3 9M6 7l6-2m6 2l3-1m-3 1l-3 9a5.002 5.002 0 006.001 0M18 7l3 9m-3-9l-6-2m0-2v2m0 16V5m0 16H9m3 0h3" />
+                              </svg>
+                            </a>
+                          </>
+                        ) : (
+                          <a
+                            href={`https://porkbun.com/checkout/search?q=${result.domain}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center text-sm text-purple-500 hover:text-purple-400 dark:text-purple-400 dark:hover:text-purple-300"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            {result.status === 'dns_error' ? 'Check Availability' : 'Check on Porkbun'}
+                            <svg className="w-4 h-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 6l3 1m0 0l-3 9a5.002 5.002 0 006.001 0M6 7l3 9M6 7l6-2m6 2l3-1m-3 1l-3 9a5.002 5.002 0 006.001 0M18 7l3 9m-3-9l-6-2m0-2v2m0 16V5m0 16H9m3 0h3" />
+                            </svg>
+                          </a>
+                        )}
+                      </div>
+
+                      {result.status === 'dns_error' && (
+                        <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                          DNS lookup failed, domain might be available for purchase
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                ))}
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
