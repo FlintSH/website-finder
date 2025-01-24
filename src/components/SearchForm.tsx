@@ -49,6 +49,9 @@ export default function SearchForm() {
       const reader = response.body?.getReader();
       if (!reader) throw new Error('No reader available');
 
+      let buffer = '';
+      const decoder = new TextDecoder();
+
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -58,10 +61,16 @@ export default function SearchForm() {
           break;
         }
 
-        const text = new TextDecoder().decode(value);
-        const lines = text.split('\n').filter(Boolean);
+        buffer += decoder.decode(value, { stream: true });
         
-        for (const line of lines) {
+        // Find complete lines in the buffer
+        let newlineIndex;
+        while ((newlineIndex = buffer.indexOf('\n')) !== -1) {
+          const line = buffer.slice(0, newlineIndex);
+          buffer = buffer.slice(newlineIndex + 1);
+          
+          if (!line.trim()) continue;
+          
           try {
             if (controller.signal.aborted) break;
             
@@ -77,6 +86,20 @@ export default function SearchForm() {
             console.error('Failed to parse result:', parseError);
             continue;
           }
+        }
+      }
+
+      // Handle any remaining data in the buffer
+      if (buffer.trim()) {
+        try {
+          const result = JSON.parse(buffer);
+          if (result.type === 'screenshot') {
+            updateResult(result.domain, { screenshot: result.screenshot });
+          } else {
+            addResult(result);
+          }
+        } catch (parseError) {
+          console.error('Failed to parse final buffer:', parseError);
         }
       }
     } catch (error) {
