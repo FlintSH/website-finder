@@ -7,7 +7,7 @@ export default function SearchForm() {
   const [keyword, setKeyword] = useState('');
   const [isSearching, setIsSearching] = useState(false);
   const [isLoadingWord, setIsLoadingWord] = useState(false);
-  const { addResult, clearResults } = useSearch();
+  const { addResult, clearResults, updateResult } = useSearch();
   const abortControllerRef = useRef<AbortController | null>(null);
 
   const cancelCurrentSearch = useCallback(() => {
@@ -66,7 +66,13 @@ export default function SearchForm() {
             if (controller.signal.aborted) break;
             
             const result = JSON.parse(line);
-            addResult(result);
+            
+            // Handle split screenshot updates
+            if (result.type === 'screenshot') {
+              updateResult(result.domain, { screenshot: result.screenshot });
+            } else {
+              addResult(result);
+            }
           } catch (parseError) {
             console.error('Failed to parse result:', parseError);
             continue;
@@ -85,7 +91,7 @@ export default function SearchForm() {
         abortControllerRef.current = null;
       }
     }
-  }, [keyword, cancelCurrentSearch, clearResults, addResult]);
+  }, [keyword, cancelCurrentSearch, clearResults, addResult, updateResult]);
 
   const getRandomWord = useCallback(async () => {
     setIsLoadingWord(true);

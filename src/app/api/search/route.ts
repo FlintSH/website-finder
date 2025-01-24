@@ -137,22 +137,42 @@ export async function POST(request: NextRequest) {
     }
 
     try {
+      // Split large updates into multiple chunks if they contain screenshot data
       if (update.screenshot) {
-        try {
-          JSON.stringify({ test: update.screenshot });
-        } catch (error) {
-          console.error('Screenshot data caused JSON serialization error:', error);
-          update.screenshot = '';
-          update.error = 'Screenshot data was invalid';
-          update.status = 'invalid_response';
-        }
-      }
+        // First send the status update without the screenshot
+        const statusUpdate = {
+          ...update,
+          screenshot: undefined,
+          logs: [{
+            timestamp: Date.now(),
+            message: 'Processing screenshot...',
+            type: 'info' as const
+          }]
+        };
+        await writer.write(
+          new TextEncoder().encode(
+            JSON.stringify(statusUpdate) + '\n'
+          )
+        );
 
-      await writer.write(
-        new TextEncoder().encode(
-          JSON.stringify(update) + '\n'
-        )
-      );
+        // Then send the screenshot in a separate update
+        const screenshotUpdate = {
+          domain: update.domain,
+          screenshot: update.screenshot,
+          type: 'screenshot'
+        };
+        await writer.write(
+          new TextEncoder().encode(
+            JSON.stringify(screenshotUpdate) + '\n'
+          )
+        );
+      } else {
+        await writer.write(
+          new TextEncoder().encode(
+            JSON.stringify(update) + '\n'
+          )
+        );
+      }
     } catch (error) {
       if (error instanceof Error && error.message.includes('ResponseAborted')) {
         console.log('Client disconnected, stopping search');
